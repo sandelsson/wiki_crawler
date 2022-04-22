@@ -34,8 +34,8 @@ class Loop:
 def find_articles(inputlist):
     results = []
     try:
-        for x in inputlist:
-            results.append(wikipedia.search(x))
+        for input in inputlist:
+            results.append(wikipedia.search(input))
         
         return results
 
