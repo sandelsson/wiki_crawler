@@ -62,7 +62,7 @@ def find_shortest_path(a1, a2):
 
 
 # I'm using breadth first search algorithm: https://www.geeksforgeeks.org/breadth-first-search-or-bfs-for-a-graph/
-# Used multiple sources but this is the main one and only one i copy-pasted from.
+# Used multiple sources but this is the main one
 
 
 def get_path(q, end, threading, loop):                               
