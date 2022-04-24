@@ -1,133 +1,191 @@
 
-from asyncio import FIRST_COMPLETED
-import copy
-from datetime import date, datetime
 import signal
 from socketserver import ThreadingMixIn
 import sys
-import xml.etree.ElementTree as ET
-from xmlrpc.client import ServerProxy
 from xmlrpc.server import SimpleXMLRPCServer
-import wikipedia
-from concurrent.futures import ThreadPoolExecutor, as_completed, thread
+from  concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
 
 
 
-proxy = ServerProxy('http://localhost:5000')
-port = 5000
-address = '127.0.0.1'
+WIKI = 'https://en.wikipedia.org/w/api.php'
 
-
-class Page:
-    def __init__(self, title, previous_page):
-        self.title = title
-        self.prev = previous_page
 
 class Loop:
-    def __init__(self, loop, visited):
-        self.loop = loop
-        self.visited = visited
+    def __init__(self, path, found):
+        self.path = path
+        self.found = found
 
 
+#https://www.mediawiki.org/wiki/API:Search#Python 
+def find_searches(inputlist):
+    A1 = inputlist[0]
+    A2 = inputlist[1]
+    search1 = []
+    search2 = []
+    search1 = find_searches_parse(A1, search1)
+    search2 = find_searches_parse(A2, search2)
+
+    return search1, search2
 
 
-def find_articles(inputlist):
-    results = []
-    try:
-        for input in inputlist:
-            results.append(wikipedia.search(input))
-        
+def find_searches_parse(SEARCHPAGE1, results):
+    PARAMS = {
+        "action": "query",
+        "format": "json",
+        "list": "search",
+        "srsearch": SEARCHPAGE1
+    }
+
+    R = requests.get(url=WIKI, params=PARAMS)
+    DATA = R.json()
+
+
+    if DATA['query']['search'] == []:
+        print("no results")
         return results
+    
 
-    except Exception as e:
-        return e
+    if len(DATA['query']['search']) < 8:
 
-def find_shortest_path(a1, a2):
+        for x in DATA['query']['search']:
+            results.append(x["title"])
+
+    else:
+        c = 0
+        while ( c < 8):
+            results.append(DATA['query']['search'][c]["title"])
+            c += 1
+    
+
+    
+            
+
+    #print(results)
+    return results
+
+
+
+
+def start_workers(a1, a2):
+    path = {
+    }
+
+    path[a1] = [a1]
+
+
+    queue = []
+    queue.append(a1)
+
+    print(queue)
+    
+    loop = Loop([], False)
+
     try:
-        visited_pages = []
-        q = []
+        while loop.found == False:
+            #https://docs.python.org/3/library/concurrent.futures.html
+            with ThreadPoolExecutor(max_workers=50) as executor:
 
-        first_page = Page(a1, [])
-        visited_pages.append(a1)
-        q.append(first_page)
+                if not loop.found:
+                    results = {executor.submit(linkfinder, i, loop): i for i in queue}
+            
+                for future in as_completed(results):
+                    page = results[future]
+                    links = future.result()
 
-        loop = Loop(True, visited_pages)
-
-        path = get_path(q,a2,True,loop)
-
-        return path
-
+                    if links != []:
+                        for l in links:
+                            if (l == a2):
+                                loop.found = True
+                                loop.path = path[page] + [l]
+                                print(f"Path found: {loop.path}\n")
+                                return loop.path
+                                
+                            if l not in path and l != page:
+                                path[l] = path[page] + [l]
+                                queue.append(l)
     except Exception as e:
-        return e
+        print(f"{e}")  
+
+#https://www.mediawiki.org/wiki/API:Links#Example_1:_Fetch_all_the_links_in_a_page
+def linkfinder(page, loop):
+
+    if loop.found:
+        return
+
+    links = []
+
+    PARAMS = {
+    "action": "query",
+    "format": "json",
+    "titles": page,
+    "prop": "links"
+}
+
+    r = requests.get(url=WIKI, params=PARAMS)
+    DATA = r.json()
+
+    PAGES = DATA["query"]["pages"]
+    try:
+        for k, v in PAGES.items():
+            for l in v["links"]:
+                #https://en.wikipedia.org/w/api.php?action=query&prop=revisions&titles=Iitti&prop=links&pllimit=max
+                if(l["ns"] == 0):
+                    links.append(l["title"])
+
+            #https://stackoverflow.com/questions/14882571/how-to-get-all-urls-in-a-wikipedia-page
+            #https://www.mediawiki.org/wiki/API:Links
+            while 'continue' in DATA:
+                PARAMS = {
+                "action": "query",
+                "format": "json",
+                "titles": page,
+                "prop": "links",
+                "pllimit": "max",
+                "plcontinue": DATA["continue"]["plcontinue"]
+            }
+            
+                R = requests.get(url=WIKI, params=PARAMS)
+                DATA = R.json()
+                PAGES = DATA["query"]["pages"]
+            
+                for k, v in PAGES.items():
+                    for l in v["links"]:
+                        if(l["ns"] == 0):
+                            links.append(l["title"])
+    
+    except:
+        pass
+    
 
 
-# I'm using breadth first search algorithm: https://www.geeksforgeeks.org/breadth-first-search-or-bfs-for-a-graph/
-# Used multiple sources but this is the main one
 
 
-def get_path(q, end, threading, loop):                               
-    while loop.loop:                                                     
-        try:
-            current_node = q.pop(0)                   
-        except Exception as e:
-            pass
-        try: #check if there's a match on the first page, if not -> threading     
-            #https://www.mediawiki.org/wiki/API:Links                                          
-            page = wikipedia.page(title=current_node.title, auto_suggest=False) 
-            links = page.links                                          
-            if (end in links):                                                 
-                loop.loop = False                                      
-                current_node.prev.append(current_node.title)                            
-                current_node.prev.append(end)                                   
-                return current_node.prev                                       
-                                                                        
-            for i in links:
-                if i not in loop.visited:
-                    loop.visited.append(i)
-                    previous_node = copy.deepcopy(current_node.prev)
-                    previous_node.append(current_node.title)
-                    a = Page(i, previous_node)
-                    q.append(a)
-        except Exception as e:                                          
-            pass
-        
-        #copied and modified from below sources
-        #https://docs.python.org/3/library/concurrent.futures.html
-        #https://superfastpython.com/threadpoolexecutor-in-python/#Step_2_Submit_Tasks_to_the_Thread_Pool
-        
-        if threading:                                           
-            threading = False
-            exec = ThreadPoolExecutor(max_workers=20)
-            results = {exec.submit(get_path, [i],end, False, loop): i for i in q}  
+    return links
 
-            return_path = []
-            for f in as_completed(results):
-                result = f.result()
-                if result != None:                              
-                    if return_path == []:
-                        return_path = result
-                    
-            print("Completed\n")
-            if return_path != []:
-                return return_path
-            else:
-                return Exception
+
+    
+
 
 
 
 # https://stackoverflow.com/questions/53621682/multi-threaded-xml-rpc-python3-7-1
+# creates threads for clients
 class SimpleThreadedXMLRPCServer(ThreadingMixIn, SimpleXMLRPCServer):
-    pass
+   pass
 
 # registering all the functions to server
-def run_server(host=address, port=port):                   
+def run_server(host="127.0.0.1", port=8000):                   
     server_addr = (host, port)
     server = SimpleThreadedXMLRPCServer(server_addr)
 
-    server.register_function(find_articles)
-    server.register_function(find_shortest_path)
+    server.register_function(find_searches_parse)
+    server.register_function(find_searches)
+    server.register_function(start_workers)
+    server.register_function(linkfinder)
 
-    print('Listening on {} port {}'.format(host, port))
+    print(f'\nServer started...')
+    print(f'Listening on {host} port {port}.\n')
 
     server.serve_forever()
 
@@ -144,5 +202,6 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 #running server on init
-if __name__ == '__main__':                              
+if __name__ == '__main__':
     run_server()
+
