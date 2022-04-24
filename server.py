@@ -77,7 +77,6 @@ def start_workers(a1, a2):
     queue = []
     queue.append(a1)
 
-    print(queue)
     
     loop = Loop([], False)
 
